@@ -24,10 +24,10 @@ def cleanup_gpio():
 FRAME_WIDTH = 240
 FRAME_HEIGHT = 160
 
-SQUARE_SIZE = 35
-START_X = 150
-START_Y = 10
-GAP = 8  # spacing between squares
+SQUARE_SIZE = 28
+START_X = 180
+START_Y = 8
+GAP = 9  # spacing between squares (1/3 of box size)
 
 PAD_ORDER = [
     "glucose",
