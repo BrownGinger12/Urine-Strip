@@ -3,6 +3,19 @@ import numpy as np
 import time
 import tkinter as tk
 from PIL import Image, ImageTk
+import RPi.GPIO as GPIO
+
+# ==============================
+# GPIO CONFIGURATION
+# ==============================
+BUTTON_PIN = 26
+
+def setup_gpio():
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+def cleanup_gpio():
+    GPIO.cleanup()
 
 # ==============================
 # CONFIGURATION FOR 320x240 LCD
@@ -130,6 +143,9 @@ class UrineAnalyzerApp:
     def __init__(self, root):
         self.root = root
         
+        # Setup GPIO
+        setup_gpio()
+        
         # Fullscreen for LCD
         root.overrideredirect(True)
         root.geometry("320x240+0+0")
@@ -142,6 +158,9 @@ class UrineAnalyzerApp:
         self.results = {p: DEFAULT_VALUE for p in PAD_ORDER}
         self.pad_colors = {p: EMPTY_BOX_COLOR.copy() for p in PAD_ORDER}
 
+        # Button state tracking
+        self.button_pressed = False
+
         # Persistent reference for Tkinter image
         self.imgtk = None
 
@@ -150,16 +169,28 @@ class UrineAnalyzerApp:
         self.video_canvas.pack(fill=tk.BOTH, expand=True)
 
         # Instructions at bottom
-        self.info_label = tk.Label(root, text="Press S=Start Q=Quit", 
+        self.info_label = tk.Label(root, text="Press Button to Start", 
                                    font=("Arial", 8), fg="white", bg="black")
         self.info_label.place(x=80, y=220)
 
-        # Bind keys
+        # Bind keys for testing
         root.bind("<s>", self.start_analysis)
         root.bind("<q>", lambda e: self.quit_app())
 
         # Start updating frames
+        self.check_button()
         self.update_frame()
+
+    def check_button(self):
+        """Check if button is pressed (active LOW)"""
+        if GPIO.input(BUTTON_PIN) == GPIO.LOW and not self.button_pressed:
+            self.button_pressed = True
+            self.start_analysis()
+        elif GPIO.input(BUTTON_PIN) == GPIO.HIGH:
+            self.button_pressed = False
+        
+        # Check button every 100ms
+        self.root.after(100, self.check_button)
 
     def start_analysis(self, event=None):
         """Start a new scan: reset everything"""
@@ -171,6 +202,7 @@ class UrineAnalyzerApp:
 
     def quit_app(self):
         self.cap.release()
+        cleanup_gpio()
         self.root.destroy()
 
     def update_frame(self):
