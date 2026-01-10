@@ -118,7 +118,10 @@ def draw_compact_info(frame, param, elapsed, wait_time, result, y_pos):
     # Shorten parameter names
     param_short = param[:3].upper()
     text = f"{param_short}:{remaining}s {result}"
-    cv2.putText(frame, text, (5, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0,255,255), 1)
+    # White background for better visibility
+    (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)
+    cv2.rectangle(frame, (3, y_pos - h - 2), (3 + w + 4, y_pos + 2), (0, 0, 0), -1)
+    cv2.putText(frame, text, (5, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0,255,255), 1)
 
 # ==============================
 # TKINTER GUI
