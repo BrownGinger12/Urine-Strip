@@ -4,6 +4,7 @@ import time
 import tkinter as tk
 from PIL import Image, ImageTk
 import RPi.GPIO as GPIO
+import threading
 
 # ==============================
 # GPIO CONFIGURATION
@@ -116,10 +117,16 @@ def match_color(sample, legend):
     return best_label
 
 def fill_square(frame, lab_color, roi):
-    x,y,w,h = roi
-    lab_img = np.full((h,w,3), lab_color, dtype=np.uint8)
-    bgr = cv2.cvtColor(lab_img, cv2.COLOR_LAB2BGR)
-    frame[y:y+h, x:x+w] = bgr
+    try:
+        x,y,w,h = roi
+        # Ensure we don't go out of bounds
+        if y+h > frame.shape[0] or x+w > frame.shape[1]:
+            return
+        lab_img = np.full((h,w,3), lab_color, dtype=np.uint8)
+        bgr = cv2.cvtColor(lab_img, cv2.COLOR_LAB2BGR)
+        frame[y:y+h, x:x+w] = bgr
+    except Exception as e:
+        print(f"Error filling square: {e}")
 
 def draw_guides(frame):
     for param, roi in PAD_ROIS.items():
@@ -160,6 +167,10 @@ class UrineAnalyzerApp:
 
         # Button state tracking
         self.button_pressed = False
+        
+        # Analysis lock to prevent freezing
+        self.analyzing = False
+        self.current_frame = None
 
         # Persistent reference for Tkinter image
         self.imgtk = None
@@ -192,6 +203,30 @@ class UrineAnalyzerApp:
         # Check button every 100ms
         self.root.after(100, self.check_button)
 
+    def analyze_parameter(self, param, frame):
+        """Analyze a single parameter in background thread"""
+        try:
+            x, y, w, h = PAD_ROIS[param]
+            # Ensure ROI is within frame bounds
+            if y+h > frame.shape[0] or x+w > frame.shape[1]:
+                print(f"ROI out of bounds for {param}")
+                self.analyzing = False
+                return
+            
+            square = frame[y:y+h, x:x+w]
+            if square.size > 0 and square.shape[0] == h and square.shape[1] == w:
+                avg_color = average_lab_color(square)
+                self.pad_colors[param] = avg_color
+                result = match_color(avg_color, LEGENDS[param])
+                self.results[param] = result
+                self.analysis_done[param] = True
+                print(f"{param}: {result}")
+            else:
+                print(f"Invalid square shape for {param}: {square.shape}")
+        except Exception as e:
+            print(f"Error analyzing {param}: {e}")
+        finally:
+            self.analyzing = False
     def start_analysis(self, event=None):
         """Start a new scan: reset everything"""
         # Prevent starting a new scan while one is running
@@ -201,6 +236,7 @@ class UrineAnalyzerApp:
                 return  # Scan still in progress
         
         self.start_time = time.time()
+        self.analyzing = False
         for p in PAD_ORDER:
             self.analysis_done[p] = False
             self.results[p] = DEFAULT_VALUE
@@ -232,25 +268,18 @@ class UrineAnalyzerApp:
             # Analyze each parameter after timer
             if self.start_time:
                 elapsed = int(time.time() - self.start_time)
-                y_text = 15
                 
-                # First pass: analyze all ready parameters
+                # Check and start analysis in background thread
                 for param in PAD_ORDER:
-                    if elapsed >= PARAM_TIMES[param] and not self.analysis_done[param]:
-                        try:
-                            x, y, w, h = PAD_ROIS[param]
-                            square = frame[y:y+h, x:x+w]
-                            if square.size > 0:  # Check if square is valid
-                                avg_color = average_lab_color(square)
-                                self.pad_colors[param] = avg_color
-                                result = match_color(avg_color, LEGENDS[param])
-                                self.results[param] = result
-                                self.analysis_done[param] = True
-                                print(f"{param}: {result}")
-                        except Exception as e:
-                            print(f"Error analyzing {param}: {e}")
+                    if elapsed >= PARAM_TIMES[param] and not self.analysis_done[param] and not self.analyzing:
+                        self.analyzing = True
+                        # Run analysis in separate thread to prevent UI freeze
+                        thread = threading.Thread(target=self.analyze_parameter, args=(param, frame.copy()))
+                        thread.daemon = True
+                        thread.start()
+                        break  # Only analyze one at a time
                 
-                # Second pass: draw all info
+                # Draw all info
                 y_text = 15
                 for param in PAD_ORDER:
                     draw_compact_info(display, param, elapsed, PARAM_TIMES[param], 
