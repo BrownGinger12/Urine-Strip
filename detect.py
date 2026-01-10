@@ -194,11 +194,18 @@ class UrineAnalyzerApp:
 
     def start_analysis(self, event=None):
         """Start a new scan: reset everything"""
+        # Prevent starting a new scan while one is running
+        if self.start_time is not None:
+            elapsed = int(time.time() - self.start_time)
+            if elapsed < max(PARAM_TIMES.values()):
+                return  # Scan still in progress
+        
         self.start_time = time.time()
         for p in PAD_ORDER:
             self.analysis_done[p] = False
             self.results[p] = DEFAULT_VALUE
             self.pad_colors[p] = EMPTY_BOX_COLOR.copy()
+        print("Scan started!")
 
     def quit_app(self):
         self.cap.release()
@@ -207,7 +214,15 @@ class UrineAnalyzerApp:
 
     def update_frame(self):
         ret, frame = self.cap.read()
-        if ret:
+        if not ret:
+            print("Camera read failed, retrying...")
+            self.cap.release()
+            time.sleep(0.1)
+            self.cap = cv2.VideoCapture(0)
+            self.root.after(100, self.update_frame)
+            return
+        
+        try:
             frame = preprocess(frame)
             display = frame.copy()
 
@@ -218,20 +233,29 @@ class UrineAnalyzerApp:
             if self.start_time:
                 elapsed = int(time.time() - self.start_time)
                 y_text = 15
+                
+                # First pass: analyze all ready parameters
+                for param in PAD_ORDER:
+                    if elapsed >= PARAM_TIMES[param] and not self.analysis_done[param]:
+                        try:
+                            x, y, w, h = PAD_ROIS[param]
+                            square = frame[y:y+h, x:x+w]
+                            if square.size > 0:  # Check if square is valid
+                                avg_color = average_lab_color(square)
+                                self.pad_colors[param] = avg_color
+                                result = match_color(avg_color, LEGENDS[param])
+                                self.results[param] = result
+                                self.analysis_done[param] = True
+                                print(f"{param}: {result}")
+                        except Exception as e:
+                            print(f"Error analyzing {param}: {e}")
+                
+                # Second pass: draw all info
+                y_text = 15
                 for param in PAD_ORDER:
                     draw_compact_info(display, param, elapsed, PARAM_TIMES[param], 
                                      self.results[param], y_text)
                     y_text += 12
-
-                    # Only analyze and fill box after timer finishes
-                    if elapsed >= PARAM_TIMES[param] and not self.analysis_done[param]:
-                        x, y, w, h = PAD_ROIS[param]
-                        square = frame[y:y+h, x:x+w]
-                        avg_color = average_lab_color(square)
-                        self.pad_colors[param] = avg_color
-                        result = match_color(avg_color, LEGENDS[param])
-                        self.results[param] = result
-                        self.analysis_done[param] = True
 
             # Fill squares with detected colors
             for param, roi in PAD_ROIS.items():
@@ -246,6 +270,9 @@ class UrineAnalyzerApp:
             self.imgtk = ImageTk.PhotoImage(image=img)
             self.video_canvas.delete("all")
             self.video_canvas.create_image(0, 0, anchor=tk.NW, image=self.imgtk)
+        
+        except Exception as e:
+            print(f"Error in update_frame: {e}")
 
         self.root.after(10, self.update_frame)
 
