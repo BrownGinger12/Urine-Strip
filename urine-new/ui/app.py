@@ -24,6 +24,7 @@ class App(tk.Tk):
         # Initialise database schema
         db.init_db()
 
+
         # The active screen widget
         self._current: tk.Widget | None = None
 
