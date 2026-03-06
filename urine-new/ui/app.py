@@ -17,13 +17,16 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Urine Analyzer")
-        self.geometry(f"{SCREEN_WIDTH}x{SCREEN_HEIGHT}+0+0")
-        self.resizable(False, False)
         self.configure(bg=COLOR_BG)
 
-        # For a real LCD kiosk set fullscreen:
-        # self.overrideredirect(True)
-        # self.attributes("-fullscreen", True)
+        # Remove title bar and window controls entirely
+        self.overrideredirect(True)
+
+        # Get actual screen dimensions and fill them
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        self.geometry(f"{sw}x{sh}+0+0")
+        self.resizable(False, False)
 
         # Initialise database schema
         db.init_db()
