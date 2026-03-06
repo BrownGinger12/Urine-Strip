@@ -1,20 +1,21 @@
 # ============================================================
-# ui/osk.py — Mobile-style on-screen keyboard
+# ui/osk.py — Full-width mobile-style on-screen keyboard
 # ============================================================
 import tkinter as tk
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import COLOR_TEXT, COLOR_HIGHLIGHT
+from config import COLOR_HIGHLIGHT
 
-# ── Palette (iOS/Android inspired) ───────────────────────
-BG_KB      = "#1a2b3c"   # keyboard background
-BG_KEY     = "#2e4057"   # normal key
-BG_SPECIAL = "#1e3048"   # shift, backspace
-BG_SPACE   = "#2e4057"   # space bar
-BG_ENTER   = "#3a7bd5"   # enter key
+BG_KB      = "#1a2b3c"
+BG_KEY     = "#2e4057"
+BG_SPECIAL = "#1e3048"
+BG_SPACE   = "#2e4057"
 FG_KEY     = "#ffffff"
-RADIUS     = 8           # corner radius (px) — drawn with Canvas
+FG_DIM     = "#aabbcc"
+RADIUS     = 8
+KEY_H      = 56
+KEY_PAD    = 6
 
 _ROWS_LOWER = [
     ["q","w","e","r","t","y","u","i","o","p"],
@@ -27,45 +28,31 @@ _ROWS_UPPER = [
     ["⇧","Z","X","C","V","B","N","M","⌫"],
 ]
 
-KEY_W  = 62   # normal key width
-KEY_H  = 52   # normal key height
-KEY_PAD = 5   # gap between keys
-
 _kb_instance = None
 
 
-# ── Rounded-rectangle key button ─────────────────────────
-
 def _rounded_btn(parent, text, width, height, bg, fg, font, command):
-    """A button drawn on a Canvas with rounded corners."""
     cv = tk.Canvas(parent, width=width, height=height,
                    bg=parent["bg"], highlightthickness=0, cursor="hand2")
 
     def _draw(color):
         cv.delete("all")
-        r = RADIUS
-        x1, y1, x2, y2 = 0, 0, width, height
+        r = min(RADIUS, width // 2, height // 2)
+        x1, y1, x2, y2 = 1, 1, width - 1, height - 1
         cv.create_polygon(
-            x1+r, y1,
-            x2-r, y1,
-            x2,   y1+r,
-            x2,   y2-r,
-            x2-r, y2,
-            x1+r, y2,
-            x1,   y2-r,
-            x1,   y1+r,
+            x1+r, y1, x2-r, y1, x2, y1+r,
+            x2, y2-r, x2-r, y2, x1+r, y2,
+            x1, y2-r, x1, y1+r,
             fill=color, smooth=True
         )
-        cv.create_text(width//2, height//2, text=text,
-                       fill=fg, font=font)
+        cv.create_text(width // 2, height // 2,
+                       text=text, fill=fg, font=font)
 
     _draw(bg)
     cv.bind("<ButtonPress-1>",   lambda e: _draw(COLOR_HIGHLIGHT))
     cv.bind("<ButtonRelease-1>", lambda e: (_draw(bg), command()))
     return cv
 
-
-# ── Keyboard Toplevel ─────────────────────────────────────
 
 class _Keyboard(tk.Toplevel):
     def __init__(self, root: tk.Tk, target: tk.Entry):
@@ -79,90 +66,73 @@ class _Keyboard(tk.Toplevel):
         self.configure(bg=BG_KB)
         self.resizable(False, False)
 
+        # Get screen width NOW — use it for all sizing
+        self._sw = root.winfo_screenwidth()
+        self._sh = root.winfo_screenheight()
+
         self._build()
         self.update_idletasks()
         self._place_bottom()
 
-    # ── Build ─────────────────────────────────────────────
+    def _key_width(self, row_len):
+        """Calculate key width so the row fills the full screen width."""
+        total_pad = KEY_PAD * (row_len + 1)
+        return (self._sw - total_pad) // row_len
 
     def _build(self):
         for w in self.winfo_children():
             w.destroy()
 
-        # ── Top bar: title + close button ──
-        top = tk.Frame(self, bg=BG_KB)
-        top.pack(fill=tk.X, padx=8, pady=(6, 2))
+        # ── Top bar ──
+        top = tk.Frame(self, bg=BG_KB, width=self._sw)
+        top.pack(fill=tk.X, padx=KEY_PAD, pady=(6, 2))
 
         tk.Label(top, text="Keyboard", font=("Helvetica", 9),
                  fg="#8899aa", bg=BG_KB).pack(side=tk.LEFT)
 
-        # Small close button top-right
-        close_cv = _rounded_btn(
-            top, "✕", 32, 24,
+        _rounded_btn(
+            top, "✕", 36, 26,
             bg="#c0392b", fg=FG_KEY,
-            font=("Helvetica", 10, "bold"),
+            font=("Helvetica", 11, "bold"),
             command=self._close,
-        )
-        close_cv.pack(side=tk.RIGHT)
-
-        rows = _ROWS_UPPER if self._upper else _ROWS_LOWER
+        ).pack(side=tk.RIGHT)
 
         # ── Letter rows ──
+        rows = _ROWS_UPPER if self._upper else _ROWS_LOWER
+
         for row in rows:
-            rf = tk.Frame(self, bg=BG_KB)
-            rf.pack(pady=KEY_PAD//2, padx=8)
-
+            kw = self._key_width(len(row))
+            rf = tk.Frame(self, bg=BG_KB, width=self._sw)
+            rf.pack(fill=tk.X, pady=KEY_PAD // 2, padx=KEY_PAD)
             for key in row:
-                if key == "⇧":
-                    w, bg, font = KEY_W + 14, BG_SPECIAL, ("Helvetica", 16)
-                    label = "⇧"
-                elif key == "⌫":
-                    w, bg, font = KEY_W + 14, BG_SPECIAL, ("Helvetica", 14)
-                    label = "⌫"
+                if key in ("⇧", "⌫"):
+                    bg   = BG_SPECIAL
+                    font = ("Helvetica", 18)
                 else:
-                    w, bg, font = KEY_W, BG_KEY, ("Helvetica", 16, "bold")
-                    label = key
+                    bg   = BG_KEY
+                    font = ("Helvetica", 16, "bold")
 
-                btn = _rounded_btn(
-                    rf, label, w, KEY_H,
+                _rounded_btn(
+                    rf, key, kw, KEY_H,
                     bg=bg, fg=FG_KEY, font=font,
                     command=lambda k=key: self._press(k),
-                )
-                btn.pack(side=tk.LEFT, padx=KEY_PAD//2)
+                ).pack(side=tk.LEFT, padx=KEY_PAD // 2)
 
-        # ── Bottom row: space + enter ──
-        br = tk.Frame(self, bg=BG_KB)
-        br.pack(pady=(KEY_PAD//2, 8), padx=8)
-
-        # Total width calculation for space bar
-        total = sum(KEY_W + KEY_PAD for _ in rows[0]) - KEY_PAD
-        space_w = total - (KEY_W + 20) - KEY_PAD * 2
-
-        _rounded_btn(br, "space", space_w, KEY_H,
-                     bg=BG_SPACE, fg="#aabbcc",
-                     font=("Helvetica", 14),
-                     command=lambda: self._press("SPACE"),
-                     ).pack(side=tk.LEFT, padx=KEY_PAD//2)
-
-        _rounded_btn(br, "Enter", KEY_W + 20, KEY_H,
-                     bg=BG_ENTER, fg=FG_KEY,
-                     font=("Helvetica", 13, "bold"),
-                     command=lambda: self._press("ENTER"),
-                     ).pack(side=tk.LEFT, padx=KEY_PAD//2)
-
-    # ── Position at screen bottom ─────────────────────────
+        # ── Space row ──
+        sr = tk.Frame(self, bg=BG_KB, width=self._sw)
+        sr.pack(fill=tk.X, pady=(KEY_PAD // 2, KEY_PAD), padx=KEY_PAD)
+        space_w = self._sw - KEY_PAD * 2
+        _rounded_btn(
+            sr, "space", space_w, KEY_H,
+            bg=BG_SPACE, fg=FG_DIM,
+            font=("Helvetica", 14),
+            command=lambda: self._press("SPACE"),
+        ).pack(side=tk.LEFT)
 
     def _place_bottom(self):
         self.update_idletasks()
-        kw = self.winfo_reqwidth()
         kh = self.winfo_reqheight()
-        sw = self._root.winfo_screenwidth()
-        sh = self._root.winfo_screenheight()
-        x  = (sw - kw) // 2
-        y  = sh - kh
-        self.geometry(f"{kw}x{kh}+{x}+{y}")
-
-    # ── Key press ─────────────────────────────────────────
+        self.geometry(f"{self._sw}x{kh}+0+{self._sh - kh}")
 
     def _press(self, key):
         t = self._target
@@ -174,15 +144,19 @@ class _Keyboard(tk.Toplevel):
                 t.delete(pos - 1, pos)
         elif key == "SPACE":
             t.insert(tk.INSERT, " ")
-        elif key == "ENTER":
-            t.event_generate("<Return>")
         elif key == "⇧":
             self._upper = not self._upper
-            self._build()
-            self._place_bottom()
+            # Defer rebuild — we are inside a canvas event handler;
+            # destroying widgets immediately causes a silent failure
+            self._root.after(0, self._rebuild_shift)
+            return
         else:
             t.insert(tk.INSERT, key)
         self._root.after(10, t.focus_set)
+
+    def _rebuild_shift(self):
+        self._build()
+        self._place_bottom()
 
     def _close(self):
         global _kb_instance
