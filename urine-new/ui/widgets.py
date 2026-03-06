@@ -94,7 +94,7 @@ class ModalDialog(tk.Toplevel):
         w, h = 380, 180
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        self.geometry(f"{w}x{h}+{(sw - w)//2}+{(sh - h)//2}")
+        self.geometry(f"{w}x{h}+{(sw - w)//2}+{sh // 6}")
 
         # Prompt
         tk.Label(self, text=prompt, font=FONT_BODY,
@@ -161,7 +161,7 @@ class ConfirmDialog(tk.Toplevel):
         w, h = 380, 160
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        self.geometry(f"{w}x{h}+{(sw - w)//2}+{(sh - h)//2}")
+        self.geometry(f"{w}x{h}+{(sw - w)//2}+{sh // 6}")
 
         # Message
         tk.Label(self, text=message, font=FONT_BODY,
