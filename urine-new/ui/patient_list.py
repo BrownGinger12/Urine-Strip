@@ -71,7 +71,7 @@ class PatientListScreen(tk.Frame):
         self._scroll = ScrollFrame(self, bg=COLOR_BG)
         self._scroll.pack(fill=tk.BOTH, expand=True)
 
-        osk.attach(search_entry)
+        osk.attach(search_entry, self.app)
 
         # ── Footer ──
         footer = tk.Frame(self, bg=COLOR_ACCENT, height=54)

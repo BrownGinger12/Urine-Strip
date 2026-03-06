@@ -120,9 +120,7 @@ class ModalDialog(tk.Toplevel):
         make_button(btn_row, "Cancel", self._cancel, bg=COLOR_DANGER).pack(side=tk.LEFT, padx=6)
 
         # Must grab + raise AFTER geometry is set
-        # inline keyboard inside the dialog
-        kb = osk.create(self)
-        osk.attach(kb, entry)
+        osk.attach(entry, self)
 
         self.update_idletasks()
         self.grab_set()
