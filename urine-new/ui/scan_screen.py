@@ -23,6 +23,14 @@ from config import (
 )
 from ui.widgets import make_topbar, make_button
 
+try:
+    import RPi.GPIO as GPIO
+    _GPIO_AVAILABLE = True
+except ImportError:
+    _GPIO_AVAILABLE = False
+
+BUTTON_PIN = 26
+
 # Friendly display names for parameters
 PARAM_LABELS = {
     "glucose":          "Glucose",
@@ -312,18 +320,35 @@ class ScanScreen(tk.Frame):
         # Return to patient log after a brief delay
         self.after(self.SAVE_DELAY, lambda: self.app.show_logs(self.patient_id))
 
-    # ── Key bindings ──────────────────────────────────────
+    # ── Button / key bindings ────────────────────────────
 
     def _bind_keys(self):
-        self.app.bind("<space>", self._on_space)
+        if _GPIO_AVAILABLE:
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            GPIO.add_event_detect(
+                BUTTON_PIN, GPIO.FALLING,
+                callback=lambda _: self.after(0, self._on_button),
+                bouncetime=300,
+            )
+        else:
+            # Fallback: spacebar for PC testing
+            self.app.bind("<space>", self._on_button)
 
     def _unbind_keys(self):
-        try:
-            self.app.unbind("<space>")
-        except Exception:
-            pass
+        if _GPIO_AVAILABLE:
+            try:
+                GPIO.remove_event_detect(BUTTON_PIN)
+                GPIO.cleanup(BUTTON_PIN)
+            except Exception:
+                pass
+        else:
+            try:
+                self.app.unbind("<space>")
+            except Exception:
+                pass
 
-    def _on_space(self, _event=None):
+    def _on_button(self, _event=None):
         if self._state in (STATE_IDLE, STATE_DONE):
             self._start_scan()
 
