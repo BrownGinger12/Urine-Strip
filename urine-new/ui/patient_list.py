@@ -1,140 +1,178 @@
 # ============================================================
-# ui/osk.py — Built-in on-screen keyboard
+# ui/patient_list.py — Patient directory screen
 # ============================================================
 import tkinter as tk
+
+import database as db
 from config import (
-    COLOR_PANEL, COLOR_ACCENT, COLOR_BORDER,
-    COLOR_HIGHLIGHT, COLOR_DANGER, COLOR_TEXT, COLOR_SUBTEXT,
-    FONT_SMALL,
+    COLOR_BG, COLOR_PANEL, COLOR_ACCENT, COLOR_BORDER,
+    COLOR_HIGHLIGHT, COLOR_SUCCESS, COLOR_DANGER,
+    COLOR_TEXT, COLOR_SUBTEXT, COLOR_ROW_ALT,
+    FONT_TITLE, FONT_BODY, FONT_SMALL,
+    SCREEN_WIDTH,
 )
-
-_ROWS_LOWER = [
-    ["1","2","3","4","5","6","7","8","9","0","⌫"],
-    ["q","w","e","r","t","y","u","i","o","p"],
-    ["a","s","d","f","g","h","j","k","l","."],
-    ["z","x","c","v","b","n","m",",","-","⇧"],
-    ["SPACE"],
-]
-_ROWS_UPPER = [
-    ["1","2","3","4","5","6","7","8","9","0","⌫"],
-    ["Q","W","E","R","T","Y","U","I","O","P"],
-    ["A","S","D","F","G","H","J","K","L","."],
-    ["Z","X","C","V","B","N","M",",","-","⇧"],
-    ["SPACE"],
-]
-
-_instance = None
+from ui.widgets import make_topbar, make_button, ModalDialog, ConfirmDialog, ScrollFrame
+from ui import osk
 
 
-class OnScreenKeyboard(tk.Frame):
+class PatientListScreen(tk.Frame):
     """
-    Inline on-screen keyboard rendered as a Frame — no Toplevel,
-    no focus stealing. Embed it in the screen layout and call
-    show(entry) / hide() to activate it.
+    Main screen: searchable table of patients with
+    [View Logs] and [New Scan] per row, plus [+ Add Patient].
     """
 
-    def __init__(self, parent, **kw):
-        super().__init__(parent, bg=COLOR_BORDER, **kw)
-        self._target = None
-        self._upper  = False
-        self._build()
+    ROW_HEIGHT = 48
 
-    # ── Build ─────────────────────────────────────────────
+    def __init__(self, parent: tk.Widget, app):
+        super().__init__(parent, bg=COLOR_BG)
+        self.app = app
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", lambda *_: self._load())
+        self._build_ui()
+        self._load()
 
-    def _build(self):
-        for w in self.winfo_children():
+    # ── Layout ───────────────────────────────────────────
+
+    def _build_ui(self):
+        # ── Top bar ──
+        bar = make_topbar(self, "🔬  Urine Analyzer")
+
+        # Search widget placed inside the bar after creation
+        search_frame = tk.Frame(bar, bg=COLOR_ACCENT)
+        search_frame.pack(side=tk.RIGHT, padx=14, pady=8)
+
+        tk.Label(search_frame, text="Search:", fg=COLOR_SUBTEXT,
+                 bg=COLOR_ACCENT, font=FONT_SMALL).pack(side=tk.LEFT, padx=(0, 4))
+        tk.Entry(
+            search_frame, textvariable=self._search_var,
+            font=FONT_BODY, width=20,
+            bg=COLOR_PANEL, fg=COLOR_TEXT,
+            insertbackground=COLOR_TEXT,
+            relief=tk.FLAT, bd=4,
+        ).pack(side=tk.LEFT)
+
+        # ── Column header ──
+        col_bar = tk.Frame(self, bg=COLOR_PANEL, height=30)
+        col_bar.pack(fill=tk.X)
+        col_bar.pack_propagate(False)
+
+        for text, anchor, width in [
+            ("Patient Name", "w", 34),
+            ("Date Added",   "w", 18),
+            ("Actions",      "w", 20),
+        ]:
+            tk.Label(
+                col_bar, text=text, fg=COLOR_SUBTEXT, bg=COLOR_PANEL,
+                font=FONT_SMALL, anchor=anchor, width=width,
+            ).pack(side=tk.LEFT, padx=(14, 0), pady=4)
+
+        # ── Scrollable list ──
+        self._scroll = ScrollFrame(self, bg=COLOR_BG)
+        self._scroll.pack(fill=tk.BOTH, expand=True)
+
+        # ── On-screen keyboard ──
+        self._kb = osk.create(self)
+
+        # ── Footer ──
+        footer = tk.Frame(self, bg=COLOR_ACCENT, height=54)
+        footer.pack(fill=tk.X, side=tk.BOTTOM)
+        footer.pack_propagate(False)
+
+        make_button(
+            footer, "+ Add New Patient", self._add_patient,
+            bg=COLOR_HIGHLIGHT, pady=8,
+        ).pack(pady=8)
+
+    # ── Data loading ─────────────────────────────────────
+
+    def _load(self):
+        inner = self._scroll.inner
+        for w in inner.winfo_children():
             w.destroy()
 
-        rows = _ROWS_UPPER if self._upper else _ROWS_LOWER
+        patients = db.get_all_patients(self._search_var.get())
 
-        for row in rows:
-            rf = tk.Frame(self, bg=COLOR_BORDER)
-            rf.pack(pady=2, padx=4)
-
-            for key in row:
-                if key == "SPACE":
-                    w, pad = 28, 4
-                elif key in ("⌫", "⇧"):
-                    w, pad = 5, 2
-                else:
-                    w, pad = 3, 2
-
-                bg = COLOR_PANEL if key in ("⌫", "⇧", "SPACE") else COLOR_ACCENT
-                label = "Space" if key == "SPACE" else key
-
-                tk.Button(
-                    rf,
-                    text=label,
-                    font=FONT_SMALL,
-                    fg=COLOR_TEXT, bg=bg,
-                    activebackground=COLOR_HIGHLIGHT,
-                    activeforeground=COLOR_TEXT,
-                    relief=tk.FLAT,
-                    width=w, pady=6, padx=pad,
-                    command=lambda k=key: self._press(k),
-                ).pack(side=tk.LEFT, padx=2)
-
-    # ── Key press ─────────────────────────────────────────
-
-    def _press(self, key):
-        if self._target is None:
+        if not patients:
+            tk.Label(
+                inner,
+                text="No patients found.  Add a new patient to get started.",
+                fg=COLOR_SUBTEXT, bg=COLOR_BG, font=FONT_BODY,
+            ).pack(pady=50)
             return
 
-        t = self._target
-        if key == "⌫":
-            pos = t.index(tk.INSERT)
-            if pos > 0:
-                t.delete(pos - 1, pos)
-        elif key == "SPACE":
-            t.insert(tk.INSERT, " ")
-        elif key == "⇧":
-            self._upper = not self._upper
-            self._build()
-        else:
-            t.insert(tk.INSERT, key)
+        for i, p in enumerate(patients):
+            self._make_row(inner, p, i)
 
-    # ── Show / hide ───────────────────────────────────────
+    def _make_row(self, parent: tk.Widget, patient: dict, idx: int):
+        bg = COLOR_PANEL if idx % 2 == 0 else COLOR_ROW_ALT
 
-    def show(self, entry: tk.Entry):
-        self._target = entry
-        self.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 0))
+        row = tk.Frame(parent, bg=bg, height=self.ROW_HEIGHT)
+        row.pack(fill=tk.X)
+        row.pack_propagate(False)
 
-    def hide(self):
-        self._target = None
-        self.pack_forget()
+        # Separator line
+        tk.Frame(row, bg=COLOR_BORDER, height=1).place(
+            relx=0, rely=0, relwidth=1
+        )
 
+        # Name
+        tk.Label(
+            row, text=patient["name"],
+            fg=COLOR_TEXT, bg=bg, font=FONT_BODY,
+            anchor="w", width=32,
+        ).pack(side=tk.LEFT, padx=(14, 0), pady=10)
 
-# ── Module-level helpers ──────────────────────────────────
+        # Date
+        date_str = (patient.get("created_at") or "")[:10] or "—"
+        tk.Label(
+            row, text=date_str,
+            fg=COLOR_SUBTEXT, bg=bg, font=FONT_SMALL,
+            anchor="w", width=16,
+        ).pack(side=tk.LEFT, pady=10)
 
-def create(parent) -> OnScreenKeyboard:
-    """Create and return an OnScreenKeyboard Frame (hidden by default)."""
-    kb = OnScreenKeyboard(parent)
-    kb.pack_forget()
-    return kb
+        # Action buttons
+        btns = tk.Frame(row, bg=bg)
+        btns.pack(side=tk.LEFT, pady=8)
 
+        pid = patient["id"]
 
-def attach(kb: OnScreenKeyboard, entry: tk.Entry):
-    """Bind an Entry to show/hide the keyboard on focus."""
-    entry.bind("<FocusIn>",  lambda _e: kb.show(entry), add="+")
-    entry.bind("<Button-1>", lambda _e: kb.show(entry), add="+")
-    entry.bind("<FocusOut>", lambda _e: _on_focus_out(kb, entry), add="+")
+        make_button(
+            btns, "View Logs",
+            lambda p=pid: self.app.show_logs(p),
+            bg=COLOR_ACCENT, padx=10, pady=4, font=FONT_SMALL,
+        ).pack(side=tk.LEFT, padx=4)
 
+        make_button(
+            btns, "▶  Scan",
+            lambda p=pid: self.app.show_scan(p),
+            bg=COLOR_SUCCESS, padx=10, pady=4, font=FONT_SMALL,
+        ).pack(side=tk.LEFT, padx=4)
 
-def _on_focus_out(kb: OnScreenKeyboard, entry: tk.Entry):
-    # Delay check so clicking a key doesn't instantly hide the keyboard
-    entry.after(150, lambda: _check_hide(kb, entry))
+        make_button(
+            btns, "✕",
+            lambda p=pid, n=patient["name"]: self._delete_patient(p, n),
+            bg=COLOR_DANGER, padx=8, pady=4, font=FONT_SMALL,
+        ).pack(side=tk.LEFT, padx=4)
 
+    # ── Actions ──────────────────────────────────────────
 
-def _check_hide(kb: OnScreenKeyboard, entry: tk.Entry):
-    try:
-        focused = entry.focus_get()
-    except Exception:
-        focused = None
+    def _add_patient(self):
+        dlg = ModalDialog(self.app, "New Patient", "Enter patient's full name:")
+        if not dlg.result:
+            return
+        name = dlg.result.strip()
+        if not name:
+            return
+        if db.patient_exists(name):
+            ConfirmDialog(self.app, "Duplicate",
+                          f'A patient named "{name}" already exists.')
+            return
+        db.add_patient(name)
+        self._load()
 
-    # Hide only if focus left both the entry and the keyboard itself
-    if focused is None or focused == entry:
-        return
-    focused_str = str(focused)
-    if focused_str.startswith(str(kb)):
-        return
-    kb.hide()
+    def _delete_patient(self, patient_id: int, name: str):
+        dlg = ConfirmDialog(self.app, "Delete Patient",
+                            f'Delete "{name}" and all their scan records? This cannot be undone.')
+        if dlg.result:
+            db.delete_patient(patient_id)
+            self._load()
