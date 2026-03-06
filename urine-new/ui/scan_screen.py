@@ -26,7 +26,8 @@ from ui.widgets import make_topbar, make_button
 try:
     import RPi.GPIO as GPIO
     _GPIO_AVAILABLE = True
-except ImportError:
+except (ImportError, RuntimeError, ModuleNotFoundError):
+    GPIO = None
     _GPIO_AVAILABLE = False
 
 BUTTON_PIN = 26
@@ -324,13 +325,21 @@ class ScanScreen(tk.Frame):
 
     def _bind_keys(self):
         if _GPIO_AVAILABLE:
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-            GPIO.add_event_detect(
-                BUTTON_PIN, GPIO.FALLING,
-                callback=lambda _: self.after(0, self._on_button),
-                bouncetime=300,
-            )
+            try:
+                GPIO.setmode(GPIO.BCM)
+                GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+                # Remove any existing event detect before adding a new one
+                try:
+                    GPIO.remove_event_detect(BUTTON_PIN)
+                except Exception:
+                    pass
+                GPIO.add_event_detect(
+                    BUTTON_PIN, GPIO.FALLING,
+                    callback=lambda _: self.after(0, self._on_button),
+                    bouncetime=300,
+                )
+            except Exception as e:
+                print(f"[GPIO] setup failed: {e}")
         else:
             # Fallback: spacebar for PC testing
             self.app.bind("<space>", self._on_button)
