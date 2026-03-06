@@ -4,9 +4,18 @@
 import tkinter as tk
 from config import (
     COLOR_BG, COLOR_PANEL, COLOR_ACCENT, COLOR_BORDER,
-    COLOR_HIGHLIGHT, COLOR_DANGER, COLOR_TEXT, COLOR_SUBTEXT,
+    COLOR_HIGHLIGHT, COLOR_DANGER, COLOR_SUCCESS,
+    COLOR_TEXT, COLOR_SUBTEXT,
     FONT_TITLE, FONT_BODY, FONT_SMALL,
 )
+# keyboard imported lazily to avoid circular import
+_kb_module = None
+
+def _get_kb():
+    global _kb_module
+    if _kb_module is None:
+        from ui import keyboard as _kb_module
+    return _kb_module
 
 
 # ── Top bar ──────────────────────────────────────────────
@@ -18,10 +27,6 @@ def make_topbar(
     right_widget: tk.Widget | None = None,
     height: int = 48,
 ) -> tk.Frame:
-    """
-    Create a styled top navigation bar.
-    Returns the bar frame (already packed).
-    """
     bar = tk.Frame(parent, bg=COLOR_ACCENT, height=height)
     bar.pack(fill=tk.X)
     bar.pack_propagate(False)
@@ -72,11 +77,11 @@ def make_button(
     return tk.Button(parent, **kw)
 
 
-# ── Modal dialog (custom, dark-themed) ──────────────────
+# ── Input dialog ─────────────────────────────────────────
 
 class ModalDialog(tk.Toplevel):
     """
-    A simple blocking text-input dialog that matches the dark theme.
+    Dark-themed blocking text-input dialog.
     Usage:
         dlg = ModalDialog(root, "New Patient", "Enter full name:")
         if dlg.result:
@@ -91,18 +96,18 @@ class ModalDialog(tk.Toplevel):
         self.configure(bg=COLOR_PANEL)
         self.resizable(False, False)
         self.transient(parent)
-        self.grab_set()
 
-        # Centre over parent
-        self.update_idletasks()
-        pw = parent.winfo_rootx() + parent.winfo_width()  // 2
-        ph = parent.winfo_rooty() + parent.winfo_height() // 2
-        w, h = 360, 160
-        self.geometry(f"{w}x{h}+{pw - w//2}+{ph - h//2}")
+        # Centre over screen
+        w, h = 380, 180
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        self.geometry(f"{w}x{h}+{(sw - w)//2}+{(sh - h)//2}")
 
+        # Prompt
         tk.Label(self, text=prompt, font=FONT_BODY,
-                 fg=COLOR_TEXT, bg=COLOR_PANEL).pack(pady=(20, 8))
+                 fg=COLOR_TEXT, bg=COLOR_PANEL).pack(pady=(24, 8))
 
+        # Entry
         self._var = tk.StringVar()
         entry = tk.Entry(
             self, textvariable=self._var,
@@ -112,14 +117,21 @@ class ModalDialog(tk.Toplevel):
             relief=tk.FLAT, bd=6,
         )
         entry.pack(padx=20)
-        entry.focus_set()
-        entry.bind("<Return>", lambda _e: self._ok())
-        entry.bind("<Escape>", lambda _e: self._cancel())
+        entry.bind("<Return>",  lambda _e: self._ok())
+        entry.bind("<Escape>",  lambda _e: self._cancel())
 
+        # Buttons
         btn_row = tk.Frame(self, bg=COLOR_PANEL)
         btn_row.pack(pady=14)
         make_button(btn_row, "Add",    self._ok,     bg=COLOR_HIGHLIGHT).pack(side=tk.LEFT, padx=6)
         make_button(btn_row, "Cancel", self._cancel, bg=COLOR_DANGER).pack(side=tk.LEFT, padx=6)
+
+        # Must grab + raise AFTER geometry is set
+        self.update_idletasks()
+        self.grab_set()
+        entry.focus_set()
+        # on-screen keyboard for the input field
+        _get_kb().OnScreenKeyboard.attach(self.master, entry)
 
         self.wait_window(self)
 
@@ -130,6 +142,58 @@ class ModalDialog(tk.Toplevel):
             self.destroy()
 
     def _cancel(self):
+        self.destroy()
+
+
+# ── Confirm dialog (replaces messagebox.askyesno) ────────
+
+class ConfirmDialog(tk.Toplevel):
+    """
+    Dark-themed Yes/No confirmation dialog.
+    Usage:
+        dlg = ConfirmDialog(root, "Delete?", "Are you sure?")
+        if dlg.result:
+            ...
+    """
+
+    def __init__(self, parent: tk.Widget, title: str, message: str):
+        super().__init__(parent)
+        self.result: bool = False
+
+        self.title(title)
+        self.configure(bg=COLOR_PANEL)
+        self.resizable(False, False)
+        self.transient(parent)
+
+        w, h = 380, 160
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        self.geometry(f"{w}x{h}+{(sw - w)//2}+{(sh - h)//2}")
+
+        # Message
+        tk.Label(self, text=message, font=FONT_BODY,
+                 fg=COLOR_TEXT, bg=COLOR_PANEL,
+                 wraplength=340, justify="center").pack(pady=(24, 12))
+
+        # Buttons
+        btn_row = tk.Frame(self, bg=COLOR_PANEL)
+        btn_row.pack()
+        make_button(btn_row, "Yes", self._yes, bg=COLOR_DANGER).pack(side=tk.LEFT, padx=8)
+        make_button(btn_row, "No",  self._no,  bg=COLOR_ACCENT).pack(side=tk.LEFT, padx=8)
+
+        self.update_idletasks()
+        self.grab_set()
+        self.focus_set()
+        self.bind("<Return>", lambda _e: self._yes())
+        self.bind("<Escape>", lambda _e: self._no())
+
+        self.wait_window(self)
+
+    def _yes(self):
+        self.result = True
+        self.destroy()
+
+    def _no(self):
         self.destroy()
 
 
@@ -161,7 +225,6 @@ class ScrollFrame(tk.Frame):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self._canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Make the inner frame expand to the canvas width
         self._canvas.bind(
             "<Configure>",
             lambda e: self._canvas.itemconfig(
@@ -169,10 +232,9 @@ class ScrollFrame(tk.Frame):
             ),
         )
 
-        # Mouse-wheel scrolling
-        self._canvas.bind_all("<MouseWheel>",  self._on_mousewheel)
-        self._canvas.bind_all("<Button-4>",    self._on_mousewheel)
-        self._canvas.bind_all("<Button-5>",    self._on_mousewheel)
+        self._canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self._canvas.bind_all("<Button-4>",   self._on_mousewheel)
+        self._canvas.bind_all("<Button-5>",   self._on_mousewheel)
 
     def _on_mousewheel(self, event):
         if event.num == 4:

@@ -18,15 +18,8 @@ class App(tk.Tk):
         super().__init__()
         self.title("Urine Analyzer")
         self.configure(bg=COLOR_BG)
-
-        # Remove title bar and window controls entirely
-        self.overrideredirect(True)
-
-        # Get actual screen dimensions and fill them
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        self.geometry(f"{sw}x{sh}+0+0")
         self.resizable(False, False)
+        self.attributes("-fullscreen", True)
 
         # Initialise database schema
         db.init_db()
