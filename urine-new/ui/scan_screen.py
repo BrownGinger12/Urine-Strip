@@ -25,6 +25,8 @@ from ui.widgets import make_topbar, make_button
 
 try:
     import RPi.GPIO as GPIO
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(26, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     _GPIO_AVAILABLE = True
 except (ImportError, RuntimeError, ModuleNotFoundError):
     GPIO = None
@@ -78,6 +80,7 @@ class ScanScreen(tk.Frame):
         self._state      = STATE_IDLE
         self._start_time: float | None = None
         self._analyzing  = False           # guard: only one thread at a time
+        self._button_pressed = False         # GPIO debounce flag
 
         self._results   = {p: DEFAULT_VALUE for p in PAD_ORDER}
         self._done      = {p: False         for p in PAD_ORDER}
@@ -321,41 +324,34 @@ class ScanScreen(tk.Frame):
         # Return to patient log after a brief delay
         self.after(self.SAVE_DELAY, lambda: self.app.show_logs(self.patient_id))
 
-    # ── Button / key bindings ────────────────────────────
+    # ── Button polling (GPIO) / key binding (PC) ─────────
 
     def _bind_keys(self):
         if _GPIO_AVAILABLE:
-            try:
-                GPIO.setmode(GPIO.BCM)
-                GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-                # Remove any existing event detect before adding a new one
-                try:
-                    GPIO.remove_event_detect(BUTTON_PIN)
-                except Exception:
-                    pass
-                GPIO.add_event_detect(
-                    BUTTON_PIN, GPIO.FALLING,
-                    callback=lambda _: self.after(0, self._on_button),
-                    bouncetime=300,
-                )
-            except Exception as e:
-                print(f"[GPIO] setup failed: {e}")
+            self._check_button()
         else:
-            # Fallback: spacebar for PC testing
             self.app.bind("<space>", self._on_button)
 
     def _unbind_keys(self):
-        if _GPIO_AVAILABLE:
-            try:
-                GPIO.remove_event_detect(BUTTON_PIN)
-                GPIO.cleanup(BUTTON_PIN)
-            except Exception:
-                pass
-        else:
+        if not _GPIO_AVAILABLE:
             try:
                 self.app.unbind("<space>")
             except Exception:
                 pass
+
+    def _check_button(self):
+        """Poll GPIO pin 26 every 100ms — same logic as original."""
+        if not self._cam_running:
+            return
+        try:
+            if GPIO.input(BUTTON_PIN) == GPIO.LOW and not self._button_pressed:
+                self._button_pressed = True
+                self._on_button()
+            elif GPIO.input(BUTTON_PIN) == GPIO.HIGH:
+                self._button_pressed = False
+        except Exception:
+            pass
+        self.after(100, self._check_button)
 
     def _on_button(self, _event=None):
         if self._state in (STATE_IDLE, STATE_DONE):
