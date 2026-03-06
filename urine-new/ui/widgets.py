@@ -8,14 +8,7 @@ from config import (
     COLOR_TEXT, COLOR_SUBTEXT,
     FONT_TITLE, FONT_BODY, FONT_SMALL,
 )
-# keyboard imported lazily to avoid circular import
-_kb_module = None
-
-def _get_kb():
-    global _kb_module
-    if _kb_module is None:
-        from ui import keyboard as _kb_module
-    return _kb_module
+from ui import osk
 
 
 # ── Top bar ──────────────────────────────────────────────
@@ -131,7 +124,7 @@ class ModalDialog(tk.Toplevel):
         self.grab_set()
         entry.focus_set()
         # on-screen keyboard for the input field
-        _get_kb().OnScreenKeyboard.attach(self.master, entry)
+        osk.attach(entry)
 
         self.wait_window(self)
 

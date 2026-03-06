@@ -2,7 +2,6 @@
 # ui/patient_list.py — Patient directory screen
 # ============================================================
 import tkinter as tk
-from tkinter import messagebox
 
 import database as db
 from config import (
@@ -12,7 +11,8 @@ from config import (
     FONT_TITLE, FONT_BODY, FONT_SMALL,
     SCREEN_WIDTH,
 )
-from ui.widgets import make_topbar, make_button, ModalDialog, ScrollFrame
+from ui.widgets import make_topbar, make_button, ModalDialog, ConfirmDialog, ScrollFrame
+from ui import osk
 
 
 class PatientListScreen(tk.Frame):
@@ -161,19 +161,15 @@ class PatientListScreen(tk.Frame):
         if not name:
             return
         if db.patient_exists(name):
-            messagebox.showwarning(
-                "Duplicate", f'A patient named "{name}" already exists.',
-                parent=self.app,
-            )
+            ConfirmDialog(self.app, "Duplicate",
+                          f'A patient named "{name}" already exists.')
             return
         db.add_patient(name)
         self._load()
 
     def _delete_patient(self, patient_id: int, name: str):
-        if messagebox.askyesno(
-            "Delete Patient",
-            f'Delete "{name}" and all their scan records?\n\nThis cannot be undone.',
-            parent=self.app,
-        ):
+        dlg = ConfirmDialog(self.app, "Delete Patient",
+                            f'Delete "{name}" and all their scan records? This cannot be undone.')
+        if dlg.result:
             db.delete_patient(patient_id)
             self._load()
