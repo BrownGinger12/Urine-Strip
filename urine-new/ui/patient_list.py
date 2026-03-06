@@ -43,13 +43,14 @@ class PatientListScreen(tk.Frame):
 
         tk.Label(search_frame, text="Search:", fg=COLOR_SUBTEXT,
                  bg=COLOR_ACCENT, font=FONT_SMALL).pack(side=tk.LEFT, padx=(0, 4))
-        tk.Entry(
+        search_entry = tk.Entry(
             search_frame, textvariable=self._search_var,
             font=FONT_BODY, width=20,
             bg=COLOR_PANEL, fg=COLOR_TEXT,
             insertbackground=COLOR_TEXT,
             relief=tk.FLAT, bd=4,
-        ).pack(side=tk.LEFT)
+        )
+        search_entry.pack(side=tk.LEFT)
 
         # ── Column header ──
         col_bar = tk.Frame(self, bg=COLOR_PANEL, height=30)
@@ -70,8 +71,7 @@ class PatientListScreen(tk.Frame):
         self._scroll = ScrollFrame(self, bg=COLOR_BG)
         self._scroll.pack(fill=tk.BOTH, expand=True)
 
-        # ── On-screen keyboard ──
-        self._kb = osk.create(self)
+        osk.attach(search_entry)
 
         # ── Footer ──
         footer = tk.Frame(self, bg=COLOR_ACCENT, height=54)
