@@ -14,12 +14,7 @@ CAM_WIDTH     = SCREEN_WIDTH - PANEL_WIDTH   # 560
 CAM_HEIGHT    = SCREEN_HEIGHT                # 480
 
 # ── Reagent Pad ROIs (in processing-frame coordinates) ───
-# Scaled up from original 240×160 design:
-#   x_scale = 560/240 ≈ 2.33,  y_scale = 480/160 = 3.0
-SQUARE_SIZE = 65
-GAP         = 21
-START_X     = 420
-START_Y     = 24
+SQUARE_SIZE = 48
 
 PAD_ORDER = [
     "glucose",
@@ -28,11 +23,21 @@ PAD_ORDER = [
     "protein",
 ]
 
+# Individual box positions (x, y) — adjust each pad independently
+PAD_POSITIONS = {
+    "glucose":          (308, 115),
+    "ph":               (303, 190),
+    "specific_gravity": (300, 272),
+    "protein":          (298, 350),
+}
+
 # Derived ROIs: { param: (x, y, w, h) }
 PAD_ROIS = {
-    param: (START_X, START_Y + i * (SQUARE_SIZE + GAP), SQUARE_SIZE, SQUARE_SIZE)
-    for i, param in enumerate(PAD_ORDER)
+    param: (x, y, SQUARE_SIZE, SQUARE_SIZE)
+    for param, (x, y) in PAD_POSITIONS.items()
 }
+
+
 
 # ── Timing (seconds after scan starts) ──────────────────
 PARAM_TIMES = {

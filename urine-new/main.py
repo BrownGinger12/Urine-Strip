@@ -13,6 +13,7 @@ from ui.app import App
 
 def main():
     app = App()
+    app.config()
     app.mainloop()
 
 
