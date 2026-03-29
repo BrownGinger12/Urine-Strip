@@ -100,22 +100,26 @@ class ScanScreen(tk.Frame):
     def _build_ui(self):
         name = self.patient["name"] if self.patient else "Unknown"
         make_topbar(self, f"Scanning:  {name}",
-                    back_command=self._go_back)
+                    back_command=self._go_back, height=50)
 
         # Main body below the top bar
         body = tk.Frame(self, bg=COLOR_BG)
         body.pack(fill=tk.BOTH, expand=True)
 
+        TOPBAR_H = 50
+        view_h = SCREEN_HEIGHT - TOPBAR_H
+        self._view_h = view_h
+
         # Camera canvas (left)
         self._cam_canvas = tk.Canvas(
-            body, width=CAM_WIDTH, height=CAM_HEIGHT,
+            body, width=CAM_WIDTH, height=view_h,
             bg="black", highlightthickness=0,
         )
         self._cam_canvas.pack(side=tk.LEFT)
 
         # Results panel (right, fixed width)
         self._panel = tk.Frame(body, bg=COLOR_PANEL,
-                               width=PANEL_WIDTH, height=CAM_HEIGHT)
+                               width=PANEL_WIDTH, height=view_h)
         self._panel.pack(side=tk.LEFT, fill=tk.Y)
         self._panel.pack_propagate(False)
 
@@ -180,7 +184,7 @@ class ScanScreen(tk.Frame):
     # ── Camera ───────────────────────────────────────────
 
     def _open_camera(self):
-        self._cap = cv2.VideoCapture(0)
+        self._cap = cv2.VideoCapture(1)
         if not self._cap.isOpened():
             self._status_var.set("⚠ Camera not found.\nPress SPACE when ready.")
         self._cam_running = True
@@ -212,9 +216,10 @@ class ScanScreen(tk.Frame):
                     fill_roi_with_color(display, self._pad_colors[param],
                                         PAD_ROIS[param])
 
-            # Render to canvas
+            # Render to canvas — scale to fit the available view height
             img = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(img)
+            img = img.resize((CAM_WIDTH, self._view_h), Image.BILINEAR)
             self._imgtk = ImageTk.PhotoImage(image=img)
             self._cam_canvas.delete("all")
             self._cam_canvas.create_image(0, 0, anchor=tk.NW, image=self._imgtk)
