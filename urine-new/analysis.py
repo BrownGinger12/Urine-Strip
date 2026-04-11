@@ -26,15 +26,36 @@ def average_lab_color(square: np.ndarray) -> np.ndarray:
 
 # ── Legend matching ──────────────────────────────────────
 
+def _to_cielab(ocv_lab: np.ndarray) -> np.ndarray:
+    """
+    Convert OpenCV LAB (all channels 0-255) to proper CIELAB scale:
+      L: 0-100,  A: -128 to 127,  B: -128 to 127
+    This ensures L, A, and B each contribute fairly to distance.
+    """
+    L = ocv_lab[0] * (100.0 / 255.0)
+    A = ocv_lab[1] - 128.0
+    B = ocv_lab[2] - 128.0
+    return np.array([L, A, B], dtype=float)
+
+
+# Weights: reduce L influence (lighting-sensitive) vs A/B (colour-sensitive)
+_LAB_WEIGHTS = np.array([0.5, 1.5, 1.5])
+
+
 def match_color(sample: np.ndarray, legend: dict) -> str:
     """
-    Find the closest legend entry by Euclidean distance in LAB space.
+    Find the closest legend entry using weighted Euclidean distance
+    in proper CIELAB space. A and B (chrominance) are weighted higher
+    than L (luminance) to reduce sensitivity to lighting variation.
     Returns the label string.
     """
+    sample_lab = _to_cielab(sample)
     best_label = DEFAULT_VALUE
     min_dist   = float("inf")
     for label, ref in legend.items():
-        dist = np.linalg.norm(sample - np.array(ref, dtype=float))
+        ref_lab = _to_cielab(np.array(ref, dtype=float))
+        diff    = (sample_lab - ref_lab) * _LAB_WEIGHTS
+        dist    = float(np.linalg.norm(diff))
         if dist < min_dist:
             min_dist   = dist
             best_label = label

@@ -1,9 +1,11 @@
 # ============================================================
 # ui/scan_screen.py — Live camera scan screen
 # ============================================================
+import re
 import tkinter as tk
 import threading
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -13,7 +15,7 @@ import database as db
 from analysis import preprocess, analyze_param, draw_roi_guides, fill_roi_with_color
 from config import (
     CAM_WIDTH, CAM_HEIGHT, PANEL_WIDTH,
-    PAD_ORDER, PAD_ROIS, PARAM_TIMES, MAX_SCAN_TIME,
+    PAD_ORDER, PAD_ROIS, PAD_POSITIONS, SQUARE_SIZE, PARAM_TIMES, MAX_SCAN_TIME,
     DEFAULT_VALUE, EMPTY_BOX_COLOR,
     COLOR_BG, COLOR_PANEL, COLOR_ACCENT, COLOR_BORDER,
     COLOR_HIGHLIGHT, COLOR_SUCCESS, COLOR_WARNING, COLOR_DANGER,
@@ -21,6 +23,8 @@ from config import (
     FONT_TITLE, FONT_BODY, FONT_SMALL, FONT_MONO,
     SCREEN_HEIGHT,
 )
+
+CONFIG_PATH = Path(__file__).parent.parent / "config.py"
 from ui.widgets import make_topbar, make_button
 
 try:
@@ -89,6 +93,13 @@ class ScanScreen(tk.Frame):
 
         # Tk image reference (prevents GC)
         self._imgtk: ImageTk.PhotoImage | None = None
+
+        # Calibration mode
+        self._calib_mode     = False
+        self._calib_selected = 0
+        self._calib_boxes    = {p: list(PAD_POSITIONS[p]) + [SQUARE_SIZE]
+                                for p in PAD_ORDER}  # {param: [x, y, size]}
+        self._calib_step     = 2
 
         self._build_ui()
         self._open_camera()
@@ -202,17 +213,21 @@ class ScanScreen(tk.Frame):
 
         if frame is not None:
             display = frame.copy()
-            draw_roi_guides(display)
+
+            if self._calib_mode:
+                self._draw_calib_overlay(display)
+            else:
+                draw_roi_guides(display)
 
             elapsed = int(time.time() - self._start_time) if self._start_time else 0
 
-            if self._state == STATE_SCANNING:
+            if self._state == STATE_SCANNING and not self._calib_mode:
                 self._tick_analysis(frame, elapsed)
                 self._update_panel(elapsed)
 
             # Fill measured pads with their detected colour
             for param in PAD_ORDER:
-                if self._done[param]:
+                if self._done[param] and not self._calib_mode:
                     fill_roi_with_color(display, self._pad_colors[param],
                                         PAD_ROIS[param])
 
@@ -337,10 +352,31 @@ class ScanScreen(tk.Frame):
         else:
             self.app.bind("<space>", self._on_button)
 
+        a = self.app
+        a.bind("<Tab>",    self._toggle_calib)
+        a.bind("<Return>", self._calib_save)
+        a.bind("1", lambda e: self._calib_select(0))
+        a.bind("2", lambda e: self._calib_select(1))
+        a.bind("3", lambda e: self._calib_select(2))
+        a.bind("4", lambda e: self._calib_select(3))
+        s = self._calib_step
+        a.bind("w", lambda e: self._calib_move( 0, -s))
+        a.bind("s", lambda e: self._calib_move( 0,  s))
+        a.bind("a", lambda e: self._calib_move(-s,  0))
+        a.bind("d", lambda e: self._calib_move( s,  0))
+        a.bind("q", lambda e: self._calib_resize(-2))
+        a.bind("e", lambda e: self._calib_resize( 2))
+
     def _unbind_keys(self):
         if not _GPIO_AVAILABLE:
             try:
                 self.app.unbind("<space>")
+            except Exception:
+                pass
+        for key in ("<Tab>", "<Return>", "1", "2", "3", "4",
+                    "w", "a", "s", "d", "q", "e"):
+            try:
+                self.app.unbind(key)
             except Exception:
                 pass
 
@@ -361,6 +397,88 @@ class ScanScreen(tk.Frame):
     def _on_button(self, _event=None):
         if self._state in (STATE_IDLE, STATE_DONE):
             self._start_scan()
+
+    # ── Calibration mode ──────────────────────────────────
+
+    def _toggle_calib(self, _event=None):
+        self._calib_mode = not self._calib_mode
+        if self._calib_mode:
+            self._status_lbl.configure(fg=COLOR_HIGHLIGHT)
+            self._status_var.set(
+                "CALIB  1-4:select  WASD:move  Q/E:size  Enter:save  Tab:exit"
+            )
+        else:
+            self._status_lbl.configure(fg=COLOR_WARNING)
+            self._status_var.set("Press Button to Scan")
+
+    def _draw_calib_overlay(self, display: np.ndarray):
+        for i, param in enumerate(PAD_ORDER):
+            x, y, sz = self._calib_boxes[param]
+            color     = (0, 255, 255) if i == self._calib_selected else (0, 255, 0)
+            thick     = 2             if i == self._calib_selected else 1
+            cv2.rectangle(display, (x, y), (x + sz, y + sz), color, thick)
+            label_y = y - 6 if y > 14 else y + sz + 14
+            cv2.putText(display, f"{i+1}:{param}",
+                        (x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+
+        bx, by, bsz = self._calib_boxes[PAD_ORDER[self._calib_selected]]
+        cv2.putText(display,
+                    f"pos:({bx},{by}) size:{bsz}",
+                    (6, display.shape[0] - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+
+    def _calib_select(self, idx: int):
+        if self._calib_mode:
+            self._calib_selected = idx
+
+    def _calib_move(self, dx: int, dy: int):
+        if not self._calib_mode:
+            return
+        param = PAD_ORDER[self._calib_selected]
+        self._calib_boxes[param][0] += dx
+        self._calib_boxes[param][1] += dy
+
+    def _calib_resize(self, delta: int):
+        if not self._calib_mode:
+            return
+        param = PAD_ORDER[self._calib_selected]
+        self._calib_boxes[param][2] = max(5, self._calib_boxes[param][2] + delta)
+
+    def _calib_save(self, _event=None):
+        if not self._calib_mode:
+            return
+        src = CONFIG_PATH.read_text()
+
+        # Update SQUARE_SIZE
+        sz = self._calib_boxes[PAD_ORDER[self._calib_selected]][2]
+        src = re.sub(r'SQUARE_SIZE\s*=\s*\d+', f'SQUARE_SIZE = {sz}', src)
+
+        # Replace the entire PAD_POSITIONS block
+        lines = ["PAD_POSITIONS = {\n"]
+        for param in PAD_ORDER:
+            x, y, _ = self._calib_boxes[param]
+            lines.append(f'    "{param}": ({x}, {y}),\n')
+        lines.append("}\n")
+        new_block = "".join(lines)
+
+        src = re.sub(
+            r'PAD_POSITIONS\s*=\s*\{[^}]*\}',
+            new_block.rstrip("\n"),
+            src,
+            flags=re.DOTALL,
+        )
+
+        CONFIG_PATH.write_text(src)
+
+        # Also update PAD_ROIS in memory so analysis uses new positions immediately
+        for param in PAD_ORDER:
+            x, y, s = self._calib_boxes[param]
+            PAD_ROIS[param] = (x, y, s, s)
+
+        self._status_var.set("Saved to config.py")
+        self.after(1500, lambda: self._status_var.set(
+            "CALIB  1-4:select  WASD:move  Q/E:size  Enter:save  Tab:exit"
+        ))
 
     # ── Navigation ────────────────────────────────────────
 
